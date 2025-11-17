@@ -3,7 +3,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: cockpit-{{ topic }}-{{ uuid }}{{ item }}
-  namespace: vms-demo
+  namespace: {{ namespace }}
   labels:
     type: {{ topic }}
 spec:
@@ -19,7 +19,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: app-{{ topic }}-{{ uuid }}{{ item }}
-  namespace: vms-demo
+  namespace: {{ namespace }}
   labels:
     type: {{ topic }}
 spec:
@@ -35,11 +35,11 @@ kind: Route
 apiVersion: route.openshift.io/v1
 metadata:
   name: cockpit-{{ topic }}-{{ uuid }}{{ item }}
-  namespace: vms-demo
+  namespace: {{ namespace }}
   labels:
     type: {{ topic }}
 spec:
-  host: cockpit-{{ topic }}-{{ uuid }}{{ item }}-vms-demo.apps.ocp.drkspace.fr
+  host: cockpit-{{ topic }}-{{ uuid }}{{ item }}-{{ namespace }}.apps.{{ cluster_name }}.{{ domain }}
   to:
     kind: Service
     name: cockpit-{{ topic }}-{{ uuid }}{{ item }}
@@ -55,11 +55,11 @@ kind: Route
 apiVersion: route.openshift.io/v1
 metadata:
   name: app-{{ topic }}-{{ uuid }}{{ item }}
-  namespace: vms-demo
+  namespace: {{ namespace }}
   labels:
     type: {{ topic }}
 spec:
-  host: app-{{ topic }}-{{ uuid }}{{ item }}-vms-demo.apps.ocp.drkspace.fr
+  host: app-{{ topic }}-{{ uuid }}{{ item }}-{{ namespace }}.apps.{{ cluster_name }}.{{ domain }}
   to:
     kind: Service
     name: app-{{ topic }}-{{ uuid }}{{ item }}
