@@ -54,10 +54,6 @@
                   secretName: vms-keys-cic
               propagationMethod:
                 configDrive: {}
-        networks:
-          - multus:
-              networkName: "{{ network }}"
-            name: "{{ network }}"
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
@@ -116,10 +112,6 @@
                   secretName: vms-keys-cic
               propagationMethod:
                 configDrive: {}
-        networks:
-          - multus:
-              networkName: "{{ network }}"
-            name: "{{ network }}"
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
@@ -137,6 +129,33 @@
           name: cloudinit
       wait_timeout: 300
       wait: yes
+    loop: "{{ range(0, vm_number|int)|list}}"
+
+  - name: Attach VMs to NetworkAttachmentDefinition {{ network }}
+    redhat.openshift.k8s:
+      host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+      api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+      validate_certs: false
+      namespace: "{{ namespace }}"
+      api_version: kubevirt.io/v1"
+      kind: VirtualMachine
+      name: "{{ topic }}-{{ uuid }}{{ item }}"
+      state: patched
+      merge_type:
+        - strategic-merge
+      definition:
+        spec:
+          template:
+            spec:
+              networks:
+                - name: "{{ network }}"
+                  multus:
+                    networkName: "{{ network }}"
+              domain:
+                devices:
+                  interfaces:
+                    - name: "{{ network }}"
+                      bridge: {}
     loop: "{{ range(0, vm_number|int)|list}}"
 
   - name: Generate VM files
