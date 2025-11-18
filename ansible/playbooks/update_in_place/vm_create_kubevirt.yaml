@@ -151,11 +151,6 @@
                 - name: "{{ network }}"
                   multus:
                     networkName: "{{ network }}"
-              domain:
-                devices:
-                  interfaces:
-                    - name: "{{ network }}"
-                      bridge: {}
     loop: "{{ range(0, vm_number|int)|list}}"
 
   - name: Generate VM files
