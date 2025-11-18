@@ -134,3 +134,9 @@
       state: present
       src: vm_template-{{ item }}.yml
     loop: "{{ range(0, vm_number|int)|list}}"
+
+  - name: Print the console URL for each VM
+    ansible.builtin.debug:
+      msg: >-
+        https://console-openshift-console.apps.{{ cluster_name }}.{{ domain }}/k8s/ns/{{ namespace }}/kubevirt.io~v1~VirtualMachine/{{ topic }}-{{ uuid }}{{ item }}/console/standalone
+    loop: "{{ range(0, vm_number|int)|list }}"
