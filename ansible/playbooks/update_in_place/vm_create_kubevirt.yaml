@@ -57,7 +57,7 @@
         networks:
           - multus:
               networkName: "{{ network }}"
-            name: admin
+            name: "{{ network }}"
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
@@ -119,7 +119,7 @@
         networks:
           - multus:
               networkName: "{{ network }}"
-            name: admin
+            name: "{{ network }}"
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
