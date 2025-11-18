@@ -48,18 +48,16 @@
         domain:
           devices: {}
         accessCredentials:
-        - sshPublicKey:
-            source:
-              secret:
-                secretName: vms-keys-cic
-            propagationMethod:
-              configDrive: {}
-#        networks:
-#          - multus:
-#              networkName: "{{ nad-name }}"
-#            name: admin
-#          - name: pod-networking
-#            pod: {}
+          - sshPublicKey:
+              source:
+                secret:
+                  secretName: vms-keys-cic
+              propagationMethod:
+                configDrive: {}
+        networks:
+          - multus:
+              networkName: "{{ nad-name }}"
+            name: admin
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
@@ -112,18 +110,16 @@
         domain:
           devices: {}
         accessCredentials:
-        - sshPublicKey:
-            source:
-              secret:
-                secretName: vms-keys-cic
-            propagationMethod:
-              configDrive: {}
-#        networks:
-#          - multus:
-#              networkName: "{{ nad-name }}"
-#            name: admin
-#          - name: pod-networking
-#            pod: {}
+          - sshPublicKey:
+              source:
+                secret:
+                  secretName: vms-keys-cic
+              propagationMethod:
+                configDrive: {}
+        networks:
+          - multus:
+              networkName: "{{ nad-name }}"
+            name: admin
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
