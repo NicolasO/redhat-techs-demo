@@ -51,7 +51,7 @@
         - sshPublicKey:
             source:
               secret:
-                secretName: dm-ssh-key
+                secretName: vms-keys-cic
             propagationMethod:
               configDrive: {}
         volumes:
@@ -61,7 +61,12 @@
         - cloudInitConfigDrive:
             userData: |-
               #cloud-config
-              # The default username is: cloud-user
+              user: {{ username }}
+              password: {{ password }}          
+              chpasswd:
+                expire: false
+              runcmd: 
+                - sudo localectl set-keymap fr 
           name: cloudinit
       wait_timeout: 300
       wait: yes
