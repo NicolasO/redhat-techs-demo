@@ -161,6 +161,7 @@
       dest: vm_template-{{ item }}.yml
     loop: "{{ range(0, vm_number|int)|list}}"
 
+
   - name: Create Service and Route for Cockpit VMs
     redhat.openshift.k8s:
       host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
