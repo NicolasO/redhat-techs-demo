@@ -54,6 +54,12 @@
                 secretName: vms-keys-cic
             propagationMethod:
               configDrive: {}
+        networks:
+          - multus:
+              networkName: net-1085
+            name: admin
+          - name: pod-networking
+            pod: {}
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
@@ -112,6 +118,12 @@
                 secretName: dm-ssh-key
             propagationMethod:
               configDrive: {}
+        networks:
+          - multus:
+              networkName: net-1085
+            name: admin
+          - name: pod-networking
+            pod: {}
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
