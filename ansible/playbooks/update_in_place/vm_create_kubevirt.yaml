@@ -56,7 +56,7 @@
               configDrive: {}
         networks:
           - multus:
-              networkName: net-1085
+              networkName: {{ nad-name }}
             name: admin
           - name: pod-networking
             pod: {}
