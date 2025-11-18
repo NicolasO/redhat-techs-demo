@@ -54,12 +54,12 @@
                 secretName: vms-keys-cic
             propagationMethod:
               configDrive: {}
-        networks:
-          - multus:
-              networkName: "{{ nad-name }}"
-            name: admin
-          - name: pod-networking
-            pod: {}
+#        networks:
+#          - multus:
+#              networkName: "{{ nad-name }}"
+#            name: admin
+#          - name: pod-networking
+#            pod: {}
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
@@ -115,15 +115,15 @@
         - sshPublicKey:
             source:
               secret:
-                secretName: dm-ssh-key
+                secretName: vms-keys-cic
             propagationMethod:
               configDrive: {}
-        networks:
-          - multus:
-              networkName: "{{ nad-name }}"
-            name: admin
-          - name: pod-networking
-            pod: {}
+#        networks:
+#          - multus:
+#              networkName: "{{ nad-name }}"
+#            name: admin
+#          - name: pod-networking
+#            pod: {}
         volumes:
         - dataVolume:
             name: "{{ topic }}-{{ uuid }}{{ item }}"
