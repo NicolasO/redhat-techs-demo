@@ -137,7 +137,7 @@
       api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
       validate_certs: false
       namespace: "{{ namespace }}"
-      api_version: kubevirt.io/v1"
+      api_version: kubevirt.io/v1
       kind: VirtualMachine
       name: "{{ topic }}-{{ uuid }}{{ item }}"
       state: patched
