@@ -48,14 +48,14 @@
         domain:
           devices: 
             interfaces:
-              - name: default
-                masquerade: {}
-                model: virtio
+#              - name: default
+#                masquerade: {}
+#                model: virtio
               - name: admin
                 bridge: {}
         networks:
-            - name: default
-              pod: {}
+#            - name: default
+#              pod: {}
             - name: admin
               multus:
                 networkName: "{{ namespace }}/{{ network }}"
@@ -120,7 +120,7 @@
             interfaces:
               #- name: default
               #  masquerade: {}
-                model: virtio
+              #  model: virtio
               - name: admin
                 bridge: {}
         networks:
