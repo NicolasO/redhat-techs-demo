@@ -178,7 +178,7 @@
     loop: "{{ range(0, vm_number|int)|list }}"
 
   - name: Wait until the VM is running
-    redhat.openshift.k8s_info:
+    redhat.openshift.k8s:
       host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
       api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
       validate_certs: false
@@ -196,7 +196,7 @@
       label: "{{ topic }}-{{ uuid }}{{ item }}"
 
   - name: Get VMI facts for each VM
-    redhat.openshift.k8s_info:
+    redhat.openshift.k8s:
       host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
       api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
       validate_certs: false
