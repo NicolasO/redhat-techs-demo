@@ -78,7 +78,7 @@
               chpasswd:
                 expire: false
               runcmd: 
-                - sudo localectl set-keymap fr 
+                - sudo localectl set-keymap fr
           name: cloudinit
       wait_timeout: 300
       wait: yes
@@ -176,3 +176,45 @@
       msg: >-
         https://console-openshift-console.apps.{{ cluster_name }}.{{ domain }}/k8s/ns/{{ namespace }}/kubevirt.io~v1~VirtualMachine/{{ topic }}-{{ uuid }}{{ item }}/console/standalone
     loop: "{{ range(0, vm_number|int)|list }}"
+
+  - name: Wait until the VM is running
+    redhat.openshift.k8s_info:
+      host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+      api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+      validate_certs: false
+      namespace: "{{ namespace }}"
+      api_version: kubevirt.io/v1
+      kind: VirtualMachineInstance
+      name: "{{ topic }}-{{ uuid }}{{ item }}"
+    register: vmi_status
+    until: vmi_status.resources and
+          vmi_status.resources[0].status.phase == "Running"
+    retries: 30   # Adjust as needed (e.g. 30*10s = 5 min)
+    delay: 10
+    loop: "{{ range(0, vm_number|int)|list }}"
+    loop_control:
+      label: "{{ topic }}-{{ uuid }}{{ item }}"
+
+  - name: Get VMI facts for each VM
+    redhat.openshift.k8s_info:
+      host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+      api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+      validate_certs: false
+      namespace: "{{ namespace }}"
+      api_version: kubevirt.io/v1
+      kind: VirtualMachineInstance
+      name: "{{ topic }}-{{ uuid }}{{ item }}"
+    loop: "{{ range(0, vm_number|int)|list }}"
+    register: vmi_results
+
+  - name: Print DHCP IPs for each VM
+    ansible.builtin.debug:
+      msg: >-
+        VM {{ topic }}-{{ uuid }}{{ item }}: {{
+          (item.resources[0].status.interfaces
+            | map(attribute='ipAddress')
+            | list)
+          if item.resources and item.resources[0].status.interfaces is defined
+          else 'No IP found'
+        }}
+    loop: "{{ vmi_results.results }}"
