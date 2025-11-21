@@ -12,7 +12,7 @@
 #    cluster_name: your-cluster
 #    domain: example.com
     # forklift base route will be: forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}
-    forklift_route: "forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}"
+    forklift_route: "forklift-inventory-{{ ns }}.apps.{{ cluster_name }}.{{ domain }}"
     # Provide a bearer token via env var K8S_AUTH_API_KEY or override here
     bearer_token: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
     filter_vm_name_regex: ""   # optional regex to filter VM names; empty = no filter
@@ -27,7 +27,7 @@
           apiVersion: v1
           kind: Secret
           metadata:
-            name: "{{ provider_name }}-secret"
+            name: "{{ provider_name_secret }}"
             namespace: "{{ ns }}"
             labels:
               createdForProviderType: vsphere
