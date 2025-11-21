@@ -1,0 +1,190 @@
+---
+- name: Configure MTV for the migration from RHV
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    provider_name: rhv-provider
+    ns: openshift-mtv
+    target_ns: migrate-rhv
+    storage_map_name: rhv-storage-map
+    network_map_name: rhv-network-map
+    plan_name: plan-from-ansible
+    rhv_cluster_user: admin@internal
+    rhv_cluster_password: redhat
+    rhv_cluster_url: https://rhvm.lab.example.com/ovirt-engine/api
+
+  pre_tasks:
+
+    - name: Authenthicate to RHV
+      ovirt.ovirt.ovirt_auth:
+        state: present
+
+  tasks:
+
+    - name: Create the target namespace
+      redhat.openshift.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ target_ns }}"
+        state: present
+
+    - name: Create a Secret manifest for the RHV provider
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: rhv-secret
+            namespace: "{{ ns }}"
+            labels:
+              createdForProviderType: ovirt
+              createdForResourceType: providers
+          type: Opaque
+          stringData:
+            user: "{{ rhv_cluster_user }}"
+            password: "{{ rhv_cluster_password }}"
+            insecureSkipVerify: "true"
+            url: "{{ rhv_cluster_url }}"
+
+    - name: Create the RHV provider
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Provider
+          metadata:
+            name: "{{ provider_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            type: ovirt
+            url: "{{ rhv_cluster_url }}"
+            secret:
+              name: rhv-secret
+              namespace: "{{ ns }}"
+
+    - name: Get info about Storage Domains
+      ovirt.ovirt.ovirt_storage_domain_info:
+        pattern: name=NFS_VMs
+        auth: "{{ ovirt_auth }}"
+      register: sd
+
+    - name: Set the storage domain names
+      ansible.builtin.set_fact:
+        storage_domain_id: "{{ sd.ovirt_storage_domains | map(attribute='id') | list }}"
+
+    - name: Create or update a StorageMap
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: StorageMap
+          metadata:
+            name: "{{ storage_map_name }}"
+            namespace: openshift-mtv
+          spec:
+            map:
+              - destination:
+                  storageClass: ocs-external-storagecluster-ceph-rbd-virtualization
+                source:
+                  id: "{{ storage_domain_id[0] }}"
+            provider:
+              destination:
+                name: host
+                namespace: openshift-mtv
+              source:
+                name: "{{ provider_name }}"
+                namespace: openshift-mtv
+
+    - name: Get info about network Domains
+      ovirt.ovirt.ovirt_network_info:
+        auth: "{{ ovirt_auth }}"
+      register: network_domain
+
+    - name: Set the network domain id
+      ansible.builtin.set_fact:
+        network_id: "{{ network_domain.ovirt_networks | map(attribute='id') | list }}"
+
+    - name: Create Network Map Object
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: NetworkMap
+          metadata:
+            name: "{{ network_map_name }}"
+            namespace: openshift-mtv
+          spec:
+            map:
+              - destination:
+                  type: multus
+                  name: vm-private-net
+                  namespace: default
+                source:
+                  id: "{{ network_id[1] }}"
+            provider:
+              destination:
+                name: host
+                namespace: openshift-mtv
+              source:
+                name: rhv-provider
+                namespace: openshift-mtv
+
+    - name: Get VM information from RHV
+      ovirt.ovirt.ovirt_vm_info:
+        pattern: cluster=Default and Storage=NFS_VMs
+        auth: "{{ ovirt_auth }}"
+      register: rhv_vms
+
+    - name: Register all VM IDs
+      ansible.builtin.set_fact:
+        vm_ids: "{{ rhv_vms.ovirt_vms | map(attribute='id') | list }}"
+
+    - name: Prepare VMs for Plan spec
+      ansible.builtin.set_fact:
+        vms_plan_spec: "{{ vms_plan_spec | default([]) + [{'hooks': [], 'id': item}] }}"
+      loop: "{{ vm_ids }}"
+
+    - name: Create the migration Plan for RHV
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Plan
+          metadata:
+            name: "{{ plan_name }}"
+            namespace: "{{ ns }}"
+            preserveClusterCpuModel: true
+          spec:
+            warm: false
+            provider:
+              source:
+                name: "{{ provider_name }}"
+                namespace: "{{ ns }}"
+              destination:
+                name: host
+                namespace: "{{ ns }}"
+            map:
+              network:
+                name: rhv-network-map
+                namespace: "{{ ns }}"
+              storage:
+                name: rhv-storage-map
+                namespace: "{{ ns }}"
+            targetNamespace: "{{ target_ns }}"
+            vms: "{{ vms_plan_spec }}"
+
+    - name: Create the migration plan
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Migration
+          metadata:
+            name: migration-rhv-to-ocp
+            namespace: "{{ ns }}"
+          spec:
+            plan:
+              name: "{{ plan_name }}"
+              namespace: "{{ ns }}"

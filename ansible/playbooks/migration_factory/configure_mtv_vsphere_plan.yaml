@@ -1,0 +1,183 @@
+---
+- name: Configure MTV objects and start migration (vSphere -> OCP)
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  collections:
+    - redhat.openshift
+
+  vars:
+    ns: openshift-mtv
+    provider_name: vsphere-provider
+    cluster_name: your-cluster
+    domain: example.com
+    forklift_route: "forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}"
+    # Provide a bearer token via env var K8S_AUTH_API_KEY or override here
+    bearer_token: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+
+    # Plan / map names and destinations
+    storage_map_name: vsphere-storage-map
+    network_map_name: vsphere-network-map
+    plan_name: vsphere-plan
+    target_ns: migrate-vsphere
+    storage_destination_storageclass: ocs-external-storagecluster-ceph-rbd-virtualization
+
+    # vm_names: list of VM names you want to include in the Plan (optional if you provide vm_ids)
+    vm_names: []
+
+    # vm_ids: list of source VM ids (optional; vm_names will be resolved to ids if provided)
+    vm_ids: []
+
+    # network_mappings: list of map entries as expected by NetworkMap.spec.map
+    # Example entry:
+    # - destination:
+    #     type: multus
+    #     name: vm-private-net
+    #     namespace: default
+    #   source:
+    #     id: "source-network-id-123"
+    network_mappings: []
+
+    # storage_map_source_name: fallback name for source storage mapping if you don't have exact IDs
+    storage_map_source_name: "vSphere-datastore"
+
+  tasks:
+
+    - name: Query provider list to determine provider UID
+      ansible.builtin.uri:
+        url: "https://{{ forklift_route }}/providers/vsphere"
+        method: GET
+        validate_certs: false
+        headers:
+          Authorization: "Bearer {{ bearer_token }}"
+      register: provider_list
+      failed_when: provider_list.status not in [200,201,202]
+
+    - name: Set provider_uid
+      ansible.builtin.set_fact:
+        provider_uid: "{{ (provider_list.json | selectattr('name','equalto', provider_name) | list)[0].uid }}"
+
+    - name: Get VMs for provider
+      ansible.builtin.uri:
+        url: "https://{{ forklift_route }}/providers/vsphere/{{ provider_uid }}/vms"
+        method: GET
+        validate_certs: false
+        headers:
+          Authorization: "Bearer {{ bearer_token }}"
+      register: provider_vms
+
+    - name: Resolve vm_ids from vm_names (if vm_names provided)
+      ansible.builtin.set_fact:
+        vm_ids: >-
+          {{
+            (vm_names | length > 0)
+            | ternary(
+                (provider_vms.json | selectattr('name','in', vm_names) | map(attribute='id') | list),
+                (vm_ids | default([]))
+              )
+          }}
+
+    - name: Fail if no VM ids provided/resolved
+      ansible.builtin.fail:
+        msg: "No VM ids provided or resolved. Set vm_ids or vm_names."
+      when: vm_ids | length == 0
+
+    - name: Create NetworkMap (if network_mappings provided)
+      when: network_mappings | length > 0
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: NetworkMap
+          metadata:
+            name: "{{ network_map_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            map: "{{ network_mappings }}"
+            provider:
+              destination:
+                name: host
+                namespace: "{{ ns }}"
+              source:
+                name: "{{ provider_name }}"
+                namespace: "{{ ns }}"
+
+    - name: Create or update StorageMap
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: StorageMap
+          metadata:
+            name: "{{ storage_map_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            map:
+              - destination:
+                  storageClass: "{{ storage_destination_storageclass }}"
+                source:
+                  name: "{{ storage_map_source_name }}"
+            provider:
+              destination:
+                name: host
+                namespace: "{{ ns }}"
+              source:
+                name: "{{ provider_name }}"
+                namespace: "{{ ns }}"
+
+    - name: Build vms_plan_spec list from vm_ids
+      ansible.builtin.set_fact:
+        vms_plan_spec: "{{ vms_plan_spec | default([]) + [{'hooks': [], 'id': item}] }}"
+      loop: "{{ vm_ids }}"
+
+    - name: Create Plan
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Plan
+          metadata:
+            name: "{{ plan_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            warm: false
+            provider:
+              source:
+                name: "{{ provider_name }}"
+                namespace: "{{ ns }}"
+              destination:
+                name: host
+                namespace: "{{ ns }}"
+            map:
+              network:
+                name: "{{ network_map_name }}"
+                namespace: "{{ ns }}"
+              storage:
+                name: "{{ storage_map_name }}"
+                namespace: "{{ ns }}"
+            targetNamespace: "{{ target_ns }}"
+            vms: "{{ vms_plan_spec }}"
+
+    - name: Optionally start the Migration (create Migration CR) - set start_migration=true to execute
+      when: start_migration | default(false)
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        wait: true
+        wait_condition:
+          type: Succeeded
+          status: "True"
+        wait_timeout: "{{ migration_wait_timeout | default(1800) }}"
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Migration
+          metadata:
+            name: "{{ plan_name }}-migration"
+            namespace: "{{ ns }}"
+          spec:
+            plan:
+              name: "{{ plan_name }}"
+              namespace: "{{ ns }}"

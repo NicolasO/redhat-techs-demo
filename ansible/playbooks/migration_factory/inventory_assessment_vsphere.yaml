@@ -1,0 +1,127 @@
+---
+- name: MTV inventory assessment for vSphere provider
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  collections:
+    - redhat.openshift
+
+  vars:
+    ns: openshift-mtv
+    provider_name: vsphere-provider
+    cluster_name: your-cluster
+    domain: example.com
+    # forklift base route will be: forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}
+    forklift_route: "forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}"
+    # Provide a bearer token via env var K8S_AUTH_API_KEY or override here
+    bearer_token: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+    filter_vm_name_regex: ""   # optional regex to filter VM names; empty = no filter
+
+  tasks:
+
+    - name: Ensure provider secret exists (vSphere)
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ provider_name }}-secret"
+            namespace: "{{ ns }}"
+            labels:
+              createdForProviderType: vsphere
+              createdForResourceType: providers
+          type: Opaque
+          stringData:
+            user: "{{ vsphere_user }}"
+            password: "{{ vsphere_password }}"
+            url: "{{ vsphere_url }}"
+            insecureSkipVerify: "true"
+
+    - name: Create Provider custom resource (vSphere) if not present
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Provider
+          metadata:
+            name: "{{ provider_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            type: vsphere
+            url: "{{ vsphere_url }}"
+            secret:
+              name: "{{ provider_name }}-secret"
+              namespace: "{{ ns }}"
+
+    - name: Get provider list from forklift inventory (vSphere)
+      ansible.builtin.uri:
+        url: "https://{{ forklift_route }}/providers/vsphere"
+        method: GET
+        validate_certs: false
+        headers:
+          Authorization: "Bearer {{ bearer_token }}"
+      register: provider_list
+      failed_when: provider_list.status not in [200, 201, 202]
+
+    - name: Fail if provider not found in forklift inventory
+      ansible.builtin.fail:
+        msg: "Provider {{ provider_name }} not found in forklift inventory at {{ forklift_route }}"
+      when: (provider_list.json | selectattr('name','equalto', provider_name) | list) | length == 0
+
+    - name: Set provider_uid
+      ansible.builtin.set_fact:
+        provider_uid: "{{ (provider_list.json | selectattr('name','equalto', provider_name) | list)[0].uid }}"
+
+    - name: Get VMs from provider
+      ansible.builtin.uri:
+        url: "https://{{ forklift_route }}/providers/vsphere/{{ provider_uid }}/vms"
+        method: GET
+        validate_certs: false
+        headers:
+          Authorization: "Bearer {{ bearer_token }}"
+      register: provider_vms
+
+    - name: Build filtered VM list (optional regex)
+      ansible.builtin.set_fact:
+        filtered_vms: >-
+          {{ (provider_vms.json | list)
+             | (filter_vm_name_regex | length > 0
+               | ternary(
+                   (provider_vms.json | selectattr('name','match', filter_vm_name_regex) | list),
+                   (provider_vms.json | list)
+                 )) }}
+
+    - name: Wait briefly for forklift to compute concerns
+      ansible.builtin.wait_for:
+        timeout: 5
+
+    - name: Get concerns for each VM
+      ansible.builtin.uri:
+        url: "https://{{ forklift_route }}/providers/vsphere/{{ provider_uid }}/workloads/{{ item.id }}"
+        method: GET
+        validate_certs: false
+        headers:
+          Authorization: "Bearer {{ bearer_token }}"
+      loop: "{{ filtered_vms }}"
+      register: concerns_results
+      failed_when: false
+
+    - name: Build assessment summary
+      ansible.builtin.set_fact:
+        assessment_summary: >-
+          {{
+            (assessment_summary | default([])) +
+            [{
+              'vm_id': item.item.id,
+              'vm_name': item.item.name,
+              'concerns': (item.json.concerns if (item.json is defined and item.json.concerns is defined) else [])
+            }]
+          }}
+      loop: "{{ concerns_results.results }}"
+
+    - name: Show assessment summary
+      ansible.builtin.debug:
+        var: assessment_summary

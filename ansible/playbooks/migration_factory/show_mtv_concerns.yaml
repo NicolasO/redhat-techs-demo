@@ -1,0 +1,105 @@
+---
+- name: Show concerns from forklift MTV
+  hosts: localhost
+  vars:
+    provider_name: rhv-provider
+    ns: openshift-mtv
+  collections:
+    - redhat.openshift
+    - redhat.openshift_virtualization
+
+  tasks:
+
+    - name: Create a Secret manifest for the RHV provider
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: rhv-secret
+            namespace: "{{ ns }}"
+            labels:
+              createdForProviderType: ovirt
+              createdForResourceType: providers
+          type: Opaque
+          stringData:
+            user: "{{ rhv_cluster_user }}"
+            password: "{{ rhv_cluster_password }}"
+            insecureSkipVerify: "true"
+            url: "{{ rhv_cluster_url }}"
+
+    - name: Create the RHV provider
+      redhat.openshift.k8s:
+        state: present
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Provider
+          metadata:
+            name: "{{ provider_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            type: ovirt
+            url: "{{ rhv_cluster_url }}"
+            secret:
+              name: rhv-secret
+              namespace: "{{ ns }}"
+
+    - name: Get the admin token from OpenShift
+      redhat.openshift.openshift_auth:
+        host: https://api.{{ cluster_name }}.{{ domain }}:6443
+        username: admin
+        password: redhatocp
+        validate_certs: false
+      register: admin_token
+
+    - name: Get the UID of the rhv-provider
+      ansible.builtin.uri:
+        url: 'https://forklift-inventory-openshift-mtv.{{ cluster_name }}.{{ domain }}/providers/ovirt'
+        method: GET
+        headers:
+          Authorization: "Bearer {{ admin_token.openshift_auth.api_key }}"
+        validate_certs: false
+      register: provider_uid
+
+    - name: Get the ID for all the VMs
+      ansible.builtin.uri:
+        url: "https://forklift-inventory-openshift-mtv.{{ cluster_name }}.{{ domain }}/providers/ovirt/{{ provider_uid.json[0].id }}/vms"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ admin_token.openshift_auth.api_key }}"
+        validate_certs: false
+      register: list_of_id_vm
+
+    - name: Set fact with filtered VMs
+      ansible.builtin.set_fact:
+        filtered_vm_list: "{{ list_of_id_vm.json | selectattr('name', '!=', 'HostedEngine') }}"
+
+    - name: Wait a couple of seconds to get the concerns
+      ansible.builtin.wait_for:
+        timeout: 10
+
+    - name: Get all the concerns for each VM
+      ansible.builtin.uri:
+        url: "https://forklift-inventory-openshift-mtv.{{ cluster_name }}.{{ domain }}/providers/ovirt/{{ provider_uid.json[0].id }}/workloads/{{ item }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ admin_token.openshift_auth.api_key }}"
+        validate_certs: false
+      loop: "{{ filtered_vm_list | map(attribute='id') }}"
+      register: concerns
+
+    - name: Initialize summary variable
+      ansible.builtin.set_fact:
+        summary: []
+
+    - name: Update summary variable with task results
+      ansible.builtin.set_fact:
+        summary: "{{ summary + [{'VM Name': concerns.results[index0].json.name, 'response': concerns.results[index0].json.concerns}] }}"
+      loop: "{{ filtered_vm_list | map(attribute='id') }}"
+      loop_control:
+        index_var: index0
+
+    - name: Display summary
+      ansible.builtin.debug:
+        var: summary
