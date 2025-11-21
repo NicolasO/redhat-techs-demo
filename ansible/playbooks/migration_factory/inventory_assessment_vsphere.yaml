@@ -86,7 +86,17 @@
 
     - name: Build filtered VM list (optional regex)
       ansible.builtin.set_fact:
-        filtered_vms: "{{ (provider_vms.json | list) | selectattr('folder', 'equalto', filter_vm_folder_name) | selectattr('name', 'match', filter_vm_name_regex) | list if (filter_vm_folder_name is defined and filter_vm_folder_name | length > 0) and (filter_vm_name_regex is defined and filter_vm_name_regex | length > 0) else (provider_vms.json | list) }}"
+        filtered_vms: >-
+          {{
+            (provider_vms.json | list)
+            | selectattr('path', 'search', filter_vm_folder_path)
+            | selectattr('name', 'match', filter_vm_name_regex)
+            | list
+            if (filter_vm_folder_path is defined and filter_vm_folder_path | length > 0)
+              and (filter_vm_name_regex is defined and filter_vm_name_regex | length > 0)
+            else (provider_vms.json | list)
+          }}
+          
     - name: Wait briefly for forklift to compute concerns
       ansible.builtin.wait_for:
         timeout: 5
