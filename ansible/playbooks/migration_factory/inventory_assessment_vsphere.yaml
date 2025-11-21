@@ -86,13 +86,7 @@
 
     - name: Build filtered VM list (optional regex)
       ansible.builtin.set_fact:
-        filtered_vms: >-
-          {{ (provider_vms.json | list)
-             | (filter_vm_name_regex | length > 0
-               | ternary(
-                   (provider_vms.json | selectattr('name','match', filter_vm_name_regex) | list),
-                   (provider_vms.json | list)
-                 )) }}
+        filtered_vms: "{{ (provider_vms.json | list | selectattr('name','match', filter_vm_name_regex) | list) if (filter_vm_name_regex | default('') | length) > 0 else (provider_vms.json | default([]) | list) }}"
 
     - name: Wait briefly for forklift to compute concerns
       ansible.builtin.wait_for:
