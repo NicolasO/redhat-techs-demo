@@ -53,7 +53,7 @@
             type: vsphere
             url: "{{ vsphere_url }}"
             secret:
-              name: "{{ provider_name }}-secret"
+              name: "{{ provider_name_secret }}"
               namespace: "{{ ns }}"
 
     - name: Get provider list from forklift inventory (vSphere)
