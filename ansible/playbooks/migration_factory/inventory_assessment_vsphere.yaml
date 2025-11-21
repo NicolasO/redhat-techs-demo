@@ -7,10 +7,10 @@
     - redhat.openshift
 
   vars:
-    ns: openshift-mtv
-    provider_name: vsphere-provider
-    cluster_name: your-cluster
-    domain: example.com
+#    ns: openshift-mtv
+#    provider_name: vsphere-provider
+#    cluster_name: your-cluster
+#    domain: example.com
     # forklift base route will be: forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}
     forklift_route: "forklift-inventory-{{ ns }}.{{ cluster_name }}.{{ domain }}"
     # Provide a bearer token via env var K8S_AUTH_API_KEY or override here
