@@ -7,44 +7,99 @@
     - redhat.openshift
 
   vars:
- #   ns: openshift-mtv
- #   provider_name: vsphere-provider
- #   cluster_name: your-cluster
- #   domain: example.com
-    forklift_route: "forklift-inventory-{{ ns }}.apps.{{ cluster_name }}.{{ domain }}"
-    # Provide a bearer token via env var K8S_AUTH_API_KEY or override here
+    # Namespaces and cluster info
+#    ns: openshift-mtv                   # Namespace where providers, maps exist
+#    target_ns: migrate-vsphere          # Target Namespace where migrated VMs will land and where net-attach-def is created
+#    cluster_name: your-cluster
+#    domain: example.com
+
+    # MTV API endpoint for forklift inventory
+ #   forklift_route: "forklift-inventory-{{ ns }}.apps.{{ cluster_name }}.{{ domain }}"
+
+    # Authentication (provide via env or override here)
     bearer_token: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
 
-    # Plan / map names and destinations
-    storage_map_name: vsphere-storage-map
-    network_map_name: vsphere-network-map
-    plan_name: vsphere-plan
-    target_ns: migrate-vsphere
-    storage_destination_storageclass: ocs-external-storagecluster-ceph-rbd-virtualization
+    # vSphere provider details (must match Secret and Provider CR names)
+#    provider_name: vsphere-provider
+    #provider_name_secret: vsphere-provider-secret
 
-    # vm_names: list of VM names you want to include in the Plan (optional if you provide vm_ids)
-    vm_names: []
+    # Credentials for provider secret (set appropriately)
+#    vsphere_url: "https://your-vcenter.example.com/sdk"
+#    vsphere_user: "administrator@vsphere.local"
+ #    vsphere_password: "your-password"
 
-    # vm_ids: list of source VM ids (optional; vm_names will be resolved to ids if provided)
-    vm_ids: []
+    # Storage / network map names
+   # storage_map_name: vsphere-storage-map
+   # network_map_name: vsphere-network-map
 
-    # network_mappings: list of map entries as expected by NetworkMap.spec.map
-    # Example entry:
-    # - destination:
-    #     type: multus
-    #     name: vm-private-net
-    #     namespace: default
-    #   source:
-    #     id: "source-network-id-123"
-    network_mappings: []
+    # Plan and migration names
+    #plan_name: vsphere-migration-plan
 
-    # storage_map_source_name: fallback name for source storage mapping if you don't have exact IDs
-    storage_map_source_name: "vSphere-datastore"
+    # StorageClass name to use on target (change to your cluster's)
+    #storage_destination_storageclass: ocs-external-storagecluster-ceph-rbd-virtualization
+
+    # Folder path regex to filter VMs by inventory path in vCenter
+    #filter_vm_folder_path: "^/HIT_Solutions/vm/Red-Hat_JJ/MTV/"
+
+    # Optional additional VM name regex filter (set to "" or omit to disable)
+    #filter_vm_name_regex: ""
+
+    # Optional vm_names override list (empty disables)
+    #vm_names: []
+
+    # Network mappings for NetworkMap resource (set your source/destination network mapping here)
+    #network_mappings: []
+
+    # Source storage map name (fallback)
+    #storage_map_source_name: "vSphere-datastore"
+
+    # Whether to start migration automatically (false = just create Plan)
+    # start_migration: false
+
+    migration_wait_timeout: 1800
 
   tasks:
+    - name: Ensure provider secret exists (vSphere)
+      redhat.openshift.k8s:
+        state: present
+        namespace: "{{ ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ provider_name_secret }}"
+            namespace: "{{ ns }}"
+            labels:
+              createdForProviderType: vsphere
+              createdForResourceType: providers
+          type: Opaque
+          stringData:
+            url: "{{ vsphere_url }}"
+            user: "{{ vsphere_user }}"
+            password: "{{ vsphere_password }}"
+            insecureSkipVerify: "true"
+
+    - name: Create Provider custom resource (vSphere) if not present
+      redhat.openshift.k8s:
+        state: present
+        namespace: "{{ ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Provider
+          metadata:
+            name: "{{ provider_name }}"
+            namespace: "{{ ns }}"
+          spec:
+            type: vsphere
+            url: "{{ vsphere_url }}"
+            secret:
+              name: "{{ provider_name_secret }}"
+              namespace: "{{ ns }}"
 
     - name: Query provider list to determine provider UID
-      ansible.builtin.uri:
+      uri:
         url: "https://{{ forklift_route }}/providers/vsphere"
         method: GET
         validate_certs: false
@@ -53,12 +108,12 @@
       register: provider_list
       failed_when: provider_list.status not in [200,201,202]
 
-    - name: Set provider_uid
-      ansible.builtin.set_fact:
+    - name: Set provider_uid from provider list
+      set_fact:
         provider_uid: "{{ (provider_list.json | selectattr('name','equalto', provider_name) | list)[0].uid }}"
 
     - name: Get VMs for provider
-      ansible.builtin.uri:
+      uri:
         url: "https://{{ forklift_route }}/providers/vsphere/{{ provider_uid }}/vms"
         method: GET
         validate_certs: false
@@ -66,26 +121,76 @@
           Authorization: "Bearer {{ bearer_token }}"
       register: provider_vms
 
-    - name: Resolve vm_ids from vm_names (if vm_names provided)
-      ansible.builtin.set_fact:
+    - name: Build filtered VM list by folder path and optional name regex
+      set_fact:
+        filtered_vms: >-
+          {{
+            (provider_vms.json | default([]) | list)
+            | selectattr('path','search', filter_vm_folder_path)
+            | 
+            (
+              filter_vm_name_regex is defined and filter_vm_name_regex | length > 0
+              | ternary(
+                  selectattr('name','match', filter_vm_name_regex),
+                  identity
+                )
+            )
+            | list
+          }}
+      vars:
+        identity: "{{ item for item in (provider_vms.json | default([]) | list) | list }}"
+
+    - name: Debug filtered VMs selected for migration
+      debug:
+        msg:
+          folder_filter: "{{ filter_vm_folder_path }}"
+          name_regex_filter: "{{ filter_vm_name_regex | default('none') }}"
+          vm_count: "{{ (filtered_vms | default([])) | length }}"
+          vm_names: "{{ (filtered_vms | default([]) | map(attribute='name') | list) }}"
+
+    - name: Set vm_ids from filtered VMs (unless vm_names override provided)
+      set_fact:
         vm_ids: >-
           {{
             (vm_names | length > 0)
             | ternary(
                 (provider_vms.json | selectattr('name','in', vm_names) | map(attribute='id') | list),
-                (vm_ids | default([]))
+                (filtered_vms | map(attribute='id') | list)
               )
           }}
 
-    - name: Fail if no VM ids provided/resolved
-      ansible.builtin.fail:
-        msg: "No VM ids provided or resolved. Set vm_ids or vm_names."
+    - name: Fail if no VM ids found
+      fail:
+        msg: "No VM ids found to migrate. Check folder path filter and vm_names."
       when: vm_ids | length == 0
 
-    - name: Create NetworkMap (if network_mappings provided)
-      when: network_mappings | length > 0
+    # Create NetworkAttachmentDefinitions for networks referred in network_mappings, in target_ns
+    - name: Create NetworkAttachmentDefinitions in target namespace
+      k8s:
+        state: present
+        namespace: "{{ target_ns }}"
+        definition:
+          apiVersion: k8s.cni.cncf.io/v1
+          kind: NetworkAttachmentDefinition
+          metadata:
+            name: "{{ nad_name }}"
+            namespace: "{{ target_ns }}"
+          spec:
+            config: >
+              {
+                "cniVersion": "0.3.1",
+                "type": "cnv-bridge",
+                "bridge": "br1",
+                "name": "{{ nad_name }}",
+                "macspoofchk": "true"
+              }
+      loop_control:
+        label: "{{ nad_name }}"
+
+    - name: Create or update NetworkMap resource in MTV namespace
       redhat.openshift.k8s:
         state: present
+        namespace: "{{ ns }}"
         validate_certs: false
         definition:
           apiVersion: forklift.konveyor.io/v1beta1
@@ -94,18 +199,26 @@
             name: "{{ network_map_name }}"
             namespace: "{{ ns }}"
           spec:
-            map: "{{ network_mappings }}"
+            map:
+              - destination:
+                  name: "{{ nad_name }}"
+                  namespace: "{{ target_ns }}"
+                  type: multus
+                source:
+                  id: "{{ vmware_network-id }}" 
+                  name: "{{ vmware_network_name }}"              
             provider:
-              destination:
-                name: host
-                namespace: "{{ ns }}"
               source:
                 name: "{{ provider_name }}"
                 namespace: "{{ ns }}"
+              destination:
+                name: host
+                namespace: "{{ ns }}"
 
-    - name: Create or update StorageMap
+    - name: Create or update StorageMap resource in MTV namespace
       redhat.openshift.k8s:
         state: present
+        namespace: "{{ ns }}"
         validate_certs: false
         definition:
           apiVersion: forklift.konveyor.io/v1beta1
@@ -120,21 +233,22 @@
                 source:
                   name: "{{ storage_map_source_name }}"
             provider:
-              destination:
-                name: host
-                namespace: "{{ ns }}"
               source:
                 name: "{{ provider_name }}"
                 namespace: "{{ ns }}"
+              destination:
+                name: host
+                namespace: "{{ ns }}"
 
-    - name: Build vms_plan_spec list from vm_ids
-      ansible.builtin.set_fact:
+    - name: Build vms_plan_spec from vm_ids
+      set_fact:
         vms_plan_spec: "{{ vms_plan_spec | default([]) + [{'hooks': [], 'id': item}] }}"
       loop: "{{ vm_ids }}"
 
-    - name: Create Plan
+    - name: Create migration Plan resource
       redhat.openshift.k8s:
         state: present
+        namespace: "{{ ns }}"
         validate_certs: false
         definition:
           apiVersion: forklift.konveyor.io/v1beta1
@@ -159,12 +273,13 @@
                 name: "{{ storage_map_name }}"
                 namespace: "{{ ns }}"
             targetNamespace: "{{ target_ns }}"
-            vms: "{{ vms_plan_spec }}"
+            vms: "{{ vms_plan_spec | default([]) }}"
 
     - name: Optionally start the Migration (create Migration CR) - set start_migration=true to execute
       when: start_migration | default(false)
       redhat.openshift.k8s:
         state: present
+        namespace: "{{ ns }}"
         validate_certs: false
         wait: true
         wait_condition:
