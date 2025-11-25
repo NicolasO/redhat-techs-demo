@@ -14,7 +14,7 @@
 #    domain: example.com
 
     # MTV API endpoint for forklift inventory
- #   forklift_route: "forklift-inventory-{{ ns }}.apps.{{ cluster_name }}.{{ domain }}"
+    forklift_route: "forklift-inventory-{{ ns }}.apps.{{ cluster_name }}.{{ domain }}"
 
     # Authentication (provide via env or override here)
     bearer_token: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
