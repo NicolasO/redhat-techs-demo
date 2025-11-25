@@ -122,21 +122,14 @@
       register: provider_vms
 
     - name: Build filtered VM list by folder path and optional name regex
-      set_fact:
+      ansible.builtin.set_fact:
         filtered_vms: >-
           {{
-            (provider_vms.json | default([]) | list)
-            | selectattr('path','search', filter_vm_folder_path)
-            | 
-            (
-              filter_vm_name_regex is defined and filter_vm_name_regex | length > 0
-              | ternary(
-                  selectattr('name','match', filter_vm_name_regex),
-                  identity
-                )
-            )
-            | list
+          (provider_vms.json | default([]) | list)
+          | selectattr('path', 'search', (filter_vm_folder_path | default()))
+          | list
           }}
+          
       vars:
         identity: "{{ item for item in (provider_vms.json | default([]) | list) | list }}"
 
