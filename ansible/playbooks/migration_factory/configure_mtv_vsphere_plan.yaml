@@ -166,8 +166,8 @@
           "{{ nad_items | default([]) + [ item_with_nad ] }}"
       vars:
         item_with_nad:
-          source: "{{ item.source | default({}) }}"
-          destination: "{{ item.destination | default({}) }}"
+        source: "{{ item.source | default({}) }}"
+        destination: "{{ item.destination | default({}) }}"
         nad_name: >-
           {{
           item.destination.nad_name
