@@ -190,7 +190,7 @@
             name: "{{ nad_name }}"
             namespace: "{{ target_ns }}"
           spec:
-            config: >
+            config: >-
               {
                 "cniVersion": "0.3.1",
                 "type": "cnv-bridge",
