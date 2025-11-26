@@ -204,7 +204,7 @@
 
     # Create NetworkAttachmentDefinitions for networks referred in network_mappings, in target_ns
     - name: Create NetworkAttachmentDefinitions in target namespace
-      k8s:
+      redhat.openshift.k8s:
         state: present
         namespace: "{{ target_ns }}"
         definition:
