@@ -160,6 +160,17 @@
         msg: "No VM ids found to migrate. Check folder path filter and vm_names."
       when: vm_ids | length == 0
 
+    # Ensure the target namespace exists before creating NADs
+    - name: Ensure target namespace exists
+      redhat.openshift.k8s:
+        state: present
+        validate_certs: false
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ target_ns }}"
+
     # Create NetworkAttachmentDefinitions for networks referred in network_mappings, in target_ns
     - name: Create NetworkAttachmentDefinitions in target namespace
       k8s:
