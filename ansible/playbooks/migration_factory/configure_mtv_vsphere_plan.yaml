@@ -171,6 +171,13 @@
           metadata:
             name: "{{ target_ns }}"
 
+    - name: Debug NAD-related vars
+      debug: 
+        msg: 
+          network_mappings: "{{ network_mappings }}" 
+          nad_name: "{{ nad_name | default('undefined') }}"
+          nad_items: "{{ nad_items | default('undefined') }}"
+
     # Create NetworkAttachmentDefinitions for networks referred in network_mappings, in target_ns
     - name: Create NetworkAttachmentDefinitions in target namespace
       k8s:
