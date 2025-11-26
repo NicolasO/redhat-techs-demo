@@ -238,7 +238,7 @@
                   namespace: "{{ target_ns }}"
                   type: multus
                 source:
-                  id: "{{ vmware_network-id }}" 
+                  id: "{{ vmware_network_id }}" 
                   name: "{{ vmware_network_name }}"              
             provider:
               source:
