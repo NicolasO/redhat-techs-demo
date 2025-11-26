@@ -160,6 +160,30 @@
         msg: "No VM ids found to migrate. Check folder path filter and vm_names."
       when: vm_ids | length == 0
 
+    - name: Build NDA items with computed nad_name per mapping
+      set_fact:
+        nad_items:
+          "{{ nad_items | default([]) + [ item_with_nad ] }}"
+      vars:
+        item_with_nad:
+          source: "{{ item.source | default({}) }}"
+          destination: "{{ item.destination | default({}) }}"
+        nad_name: >-
+          {{
+          item.destination.nad_name
+          | default( (nad_name_single | default('')) | default(nad_name_prefix | default('') ~ item.destination.name) )
+          }}
+      loop: "{{ network_mappings | default([]) }}"
+      loop_control:
+        label: "{{ item.destination.name | default('unnamed') }}"
+      when: network_mappings | length > 0
+
+    - name: Debug computed nad_items
+      debug:
+        var: nad_items
+      when: network_mappings | length > 0
+
+
     # Ensure the target namespace exists before creating NADs
     - name: Ensure target namespace exists
       redhat.openshift.k8s:
