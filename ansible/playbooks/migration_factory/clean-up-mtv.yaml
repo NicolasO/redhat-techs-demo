@@ -7,18 +7,18 @@
     - redhat.openshift
 
   vars:
-    ns: openshift-mtv
-    target_ns: migrate-vsphere
+#    ns: openshift-mtv
+    #target_ns: migrate-vsphere
 
-    network_map_name: vsphere-network-map
-    storage_map_name: vsphere-storage-map
-    plan_name: vsphere-migration-plan
+    #network_map_name: vsphere-network-map
+    #storage_map_name: vsphere-storage-map
+    #plan_name: vsphere-migration-plan
     migration_name: "{{ plan_name }}-migration"
+    bearer_token: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+    #nad_names:
+    #  - net-1085
 
-    nad_names:
-      - net-1085
-
-    remove_target_namespace: false
+    #remove_target_namespace: false
 
   tasks:
     - name: Debug what will be removed
@@ -97,7 +97,9 @@
       ignore_errors: true
 
     - name: List VirtualMachine resources in target namespace
-      kubernetes.core.k8s_info:
+      redhat.openshift_virtualization.kubevirt_vm_info:
+        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         api_version: kubevirt.io/v1
         kind: VirtualMachine
         namespace: "{{ target_ns }}"
@@ -121,7 +123,9 @@
           vm_uids: "{{ vm_uids }}"
 
     - name: List VirtualMachineInstance resources in target namespace
-      kubernetes.core.k8s_info:
+      redhat.openshift_virtualization.kubevirt_vm_info:
+        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         api_version: kubevirt.io/v1
         kind: VirtualMachineInstance
         namespace: "{{ target_ns }}"
@@ -129,7 +133,9 @@
 
     - name: Delete VirtualMachineInstance objects (force stop) if present
       when: vmi_list.resources | length > 0
-      redhat.openshift.k8s:
+      redhat.openshift_virtualization.kubevirt_vm_info:
+        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         state: absent
         namespace: "{{ target_ns }}"
         validate_certs: false
@@ -146,7 +152,9 @@
       register: delete_vmi_results
 
     - name: Delete VirtualMachine resources in target namespace
-      redhat.openshift.k8s:
+      redhat.openshift_virtualization.kubevirt_vm_info:
+        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         state: absent
         namespace: "{{ target_ns }}"
         validate_certs: false
@@ -163,7 +171,7 @@
       register: delete_vm_results
 
     - name: List PVCs in target namespace
-      kubernetes.core.k8s_info:
+      redhat.openshift_virtualization.kubevirt_vm_info:
         api_version: v1
         kind: PersistentVolumeClaim
         namespace: "{{ target_ns }}"
@@ -233,7 +241,7 @@
           metadata:
             name: "{{ target_ns }}"
       ignore_errors: true
-      
+
     - name: Final debug - summary of deletion attempts
       debug:
         msg:
@@ -241,19 +249,6 @@
           vmi_delete_results: "{{ delete_vmi_results.results | default([]) | map(attribute='msg') | list }}"
           vm_delete_results: "{{ delete_vm_results.results | default([]) | map(attribute='msg') | list }}"
           pvc_delete_results: "{{ delete_pvc_results.results | default([]) | map(attribute='msg') | list }}"
-          network_map_deleted: "{{ network_map_name }}"
-          storage_map_deleted: "{{ storage_map_name }}"
-          plan_deleted: "{{ plan_name }}"
-          migration_deleted: "{{ migration_name }}"
-          provider_left_intact: "Provider resource is not touched by this playbook"
-
-
-
-
-    - name: Final debug - summary of deletion attempts
-      debug:
-        msg:
-          nad_delete_results: "{{ delete_nad_results.results | default([]) | map(attribute='msg') | list }}"
           network_map_deleted: "{{ network_map_name }}"
           storage_map_deleted: "{{ storage_map_name }}"
           plan_deleted: "{{ plan_name }}"
