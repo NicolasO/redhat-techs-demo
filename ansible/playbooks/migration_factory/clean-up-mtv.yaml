@@ -131,7 +131,6 @@
       register: vmi_list
 
     - name: Delete VirtualMachineInstance objects (force stop) if present
-      when: vmi_list.resources | length > 0
       redhat.openshift_virtualization.kubevirt_vmi_info:
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
@@ -140,7 +139,6 @@
         validate_certs: false
         definition:
           apiVersion: kubevirt.io/v1
-          kind: VirtualMachineInstance
           metadata:
             name: "{{ item.metadata.name }}"
             namespace: "{{ target_ns }}"
@@ -159,7 +157,6 @@
         validate_certs: false
         definition:
           apiVersion: kubevirt.io/v1
-          kind: VirtualMachine
           metadata:
             name: "{{ item }}"
             namespace: "{{ target_ns }}"
@@ -170,7 +167,7 @@
       register: delete_vm_results
 
     - name: List PVCs in target namespace
-      redhat.openshift_virtualization.kubevirt_vm_info:
+      redhat.openshift.k8s:
         api_version: v1
         kind: PersistentVolumeClaim
         namespace: "{{ target_ns }}"
