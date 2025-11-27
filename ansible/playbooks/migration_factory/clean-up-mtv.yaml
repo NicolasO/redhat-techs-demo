@@ -97,74 +97,27 @@
             namespace: "{{ ns }}"
       ignore_errors: true
 
-    - name: List VirtualMachine resources in target namespace
+    - name: List VMs on OpenShift Virtualization
       redhat.openshift_virtualization.kubevirt_vm_info:
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
-        api_version: kubevirt.io/v1
-        namespace: "{{ target_ns }}"
-      register: vm_list
-
-    - name: Fail early if no VMs found in target namespace
-      fail:
-        msg: "No VirtualMachine resources found in target namespace {{ target_ns }}. Nothing to delete."
-      when: vm_list.resources | length == 0
-
-    - name: Build list of VM names and UIDs to delete
-      set_fact:
-        vm_names: "{{ vm_list.resources | map(attribute='metadata.name') | list }}"
-        vm_uids: "{{ vm_list.resources | map(attribute='metadata.uid') | list }}"
-
-    - name: Debug VMs to be deleted
-      debug:
-        msg:
-          vm_count: "{{ vm_names | length }}"
-          vm_names: "{{ vm_names }}"
-          vm_uids: "{{ vm_uids }}"
-
-    - name: List VirtualMachineInstance resources in target namespace
-      redhat.openshift_virtualization.kubevirt_vmi_info:
-        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
-        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
-        api_version: kubevirt.io/v1
-        namespace: "{{ target_ns }}"
-      register: vmi_list
-
-    - name: Delete VirtualMachineInstance objects (force stop) if present
-      redhat.openshift_virtualization.kubevirt_vmi_info:
-        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
-        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
-        state: absent
-        namespace: "{{ target_ns }}"
         validate_certs: false
-        definition:
-          apiVersion: kubevirt.io/v1
-          metadata:
-            name: "{{ item.metadata.name }}"
-            namespace: "{{ target_ns }}"
-      loop: "{{ vmi_list.resources }}"
-      loop_control:
-        label: "{{ item.metadata.name }}"
-      ignore_errors: true
-      register: delete_vmi_results
+        namespace: "{{ target_ns }}"
+      register: result
+      
+    - name: Set list vms by name
+      ansible.builtin.set_fact:
+        vms_list: "{{ result | json_query('resources[*].metadata.name') }}"
 
-    - name: Delete VirtualMachine resources in target namespace
-      redhat.openshift_virtualization.kubevirt_vm_info:
+    - name: Delete VirtualMachine on OCP "{{ target_ns }}"
+      redhat.openshift_virtualization.kubevirt_vm:
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
-        state: absent
-        namespace: "{{ target_ns }}"
         validate_certs: false
-        definition:
-          apiVersion: kubevirt.io/v1
-          metadata:
-            name: "{{ item }}"
-            namespace: "{{ target_ns }}"
-      loop: "{{ vm_names | default([]) }}"
-      loop_control:
-        label: "{{ item }}"
-      ignore_errors: true
-      register: delete_vm_results
+        state: absent
+        name: "{{ item }}"
+        namespace: "{{ target_ns }}"
+      loop: "{{ vms_list }}"
 
     - name: List PVCs in target namespace
       redhat.openshift.k8s:
@@ -173,59 +126,16 @@
         namespace: "{{ target_ns }}"
       register: pvc_list
 
-    - name: Build list of PVCs owned by deleted VMs (match ownerReference.uid against VM UIDs)
-      set_fact:
-        pvcs_to_delete: >-
-          {{
-            (pvc_list.resources | default([]))
-            | selectattr('metadata.ownerReferences', 'defined')
-            | selectattr('metadata.ownerReferences',
-                'select', True,
-                attribute=None)   # placeholder to allow Jinja expression below
-          }}
-      vars:
-        # compute PVC names whose any ownerReference.uid is in vm_uids
-        pvcs_to_delete: >-
-          {{
-            (pvc_list.resources | default([]))
-            | select(
-                lambda p: (
-                  (p.metadata.ownerReferences is defined)
-                  and
-                  (
-                    p.metadata.ownerReferences
-                    | map(attribute='uid')
-                    | intersect(vm_uids)
-                    | length > 0
-                  )
-                )
-              )
-            | map(attribute='metadata.name')
-            | list
-          }}
-
-    - name: Debug PVCs identified for deletion
-      debug:
-        msg:
-          pvcs_to_delete: "{{ pvcs_to_delete | default([]) }}"
-
-    - name: Delete PVCs owned by deleted VMs
-      when: pvcs_to_delete | length > 0
+    - name: Delete PVC on OCP "{{ target_ns }}"
       redhat.openshift.k8s:
-        state: absent
-        namespace: "{{ target_ns }}"
+        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
+        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         validate_certs: false
-        definition:
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: "{{ item }}"
-            namespace: "{{ target_ns }}"
-      loop: "{{ pvcs_to_delete }}"
-      loop_control:
-        label: "{{ item }}"
-      ignore_errors: true
-      register: delete_pvc_results
+        state: absent
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ target_ns }}"
+      loop: "{{ pvc_list }}"
+
 
     - name: Delete target namespace
       redhat.openshift.k8s:
