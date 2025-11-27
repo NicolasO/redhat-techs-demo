@@ -1,0 +1,262 @@
+---
+- name: Remove MTV objects (keep Provider)
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  collections:
+    - redhat.openshift
+
+  vars:
+    ns: openshift-mtv
+    target_ns: migrate-vsphere
+
+    network_map_name: vsphere-network-map
+    storage_map_name: vsphere-storage-map
+    plan_name: vsphere-migration-plan
+    migration_name: "{{ plan_name }}-migration"
+
+    nad_names:
+      - net-1085
+
+    remove_target_namespace: false
+
+  tasks:
+    - name: Debug what will be removed
+      debug:
+        msg:
+          ns: "{{ ns }}"
+          target_ns: "{{ target_ns }}"
+          nad_names: "{{ nad_names }}"
+          network_map: "{{ network_map_name }}"
+          storage_map: "{{ storage_map_name }}"
+          plan: "{{ plan_name }}"
+          migration: "{{ migration_name }}"
+
+    - name: Delete NetworkAttachmentDefinitions in target namespace
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ target_ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: k8s.cni.cncf.io/v1
+          kind: NetworkAttachmentDefinition
+          metadata:
+            name: "{{ nad_names }}"
+            namespace: "{{ target_ns }}"
+
+    - name: Delete NetworkMap resource in MTV namespace
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: NetworkMap
+          metadata:
+            name: "{{ network_map_name }}"
+            namespace: "{{ ns }}"
+      ignore_errors: true
+
+    - name: Delete StorageMap resource in MTV namespace
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: StorageMap
+          metadata:
+            name: "{{ storage_map_name }}"
+            namespace: "{{ ns }}"
+      ignore_errors: true
+
+    - name: Delete Plan resource in MTV namespace
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Plan
+          metadata:
+            name: "{{ plan_name }}"
+            namespace: "{{ ns }}"
+      ignore_errors: true
+
+    - name: Delete Migration resource in MTV namespace
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: forklift.konveyor.io/v1beta1
+          kind: Migration
+          metadata:
+            name: "{{ migration_name }}"
+            namespace: "{{ ns }}"
+      ignore_errors: true
+
+    - name: List VirtualMachine resources in target namespace
+      kubernetes.core.k8s_info:
+        api_version: kubevirt.io/v1
+        kind: VirtualMachine
+        namespace: "{{ target_ns }}"
+      register: vm_list
+
+    - name: Fail early if no VMs found in target namespace
+      fail:
+        msg: "No VirtualMachine resources found in target namespace {{ target_ns }}. Nothing to delete."
+      when: vm_list.resources | length == 0
+
+    - name: Build list of VM names and UIDs to delete
+      set_fact:
+        vm_names: "{{ vm_list.resources | map(attribute='metadata.name') | list }}"
+        vm_uids: "{{ vm_list.resources | map(attribute='metadata.uid') | list }}"
+
+    - name: Debug VMs to be deleted
+      debug:
+        msg:
+          vm_count: "{{ vm_names | length }}"
+          vm_names: "{{ vm_names }}"
+          vm_uids: "{{ vm_uids }}"
+
+    - name: List VirtualMachineInstance resources in target namespace
+      kubernetes.core.k8s_info:
+        api_version: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        namespace: "{{ target_ns }}"
+      register: vmi_list
+
+    - name: Delete VirtualMachineInstance objects (force stop) if present
+      when: vmi_list.resources | length > 0
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ target_ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{ item.metadata.name }}"
+            namespace: "{{ target_ns }}"
+      loop: "{{ vmi_list.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      ignore_errors: true
+      register: delete_vmi_results
+
+    - name: Delete VirtualMachine resources in target namespace
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ target_ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachine
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ target_ns }}"
+      loop: "{{ vm_names | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      ignore_errors: true
+      register: delete_vm_results
+
+    - name: List PVCs in target namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ target_ns }}"
+      register: pvc_list
+
+    - name: Build list of PVCs owned by deleted VMs (match ownerReference.uid against VM UIDs)
+      set_fact:
+        pvcs_to_delete: >-
+          {{
+            (pvc_list.resources | default([]))
+            | selectattr('metadata.ownerReferences', 'defined')
+            | selectattr('metadata.ownerReferences',
+                'select', True,
+                attribute=None)   # placeholder to allow Jinja expression below
+          }}
+      vars:
+        # compute PVC names whose any ownerReference.uid is in vm_uids
+        pvcs_to_delete: >-
+          {{
+            (pvc_list.resources | default([]))
+            | select(
+                lambda p: (
+                  (p.metadata.ownerReferences is defined)
+                  and
+                  (
+                    p.metadata.ownerReferences
+                    | map(attribute='uid')
+                    | intersect(vm_uids)
+                    | length > 0
+                  )
+                )
+              )
+            | map(attribute='metadata.name')
+            | list
+          }}
+
+    - name: Debug PVCs identified for deletion
+      debug:
+        msg:
+          pvcs_to_delete: "{{ pvcs_to_delete | default([]) }}"
+
+    - name: Delete PVCs owned by deleted VMs
+      when: pvcs_to_delete | length > 0
+      redhat.openshift.k8s:
+        state: absent
+        namespace: "{{ target_ns }}"
+        validate_certs: false
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ target_ns }}"
+      loop: "{{ pvcs_to_delete }}"
+      loop_control:
+        label: "{{ item }}"
+      ignore_errors: true
+      register: delete_pvc_results
+
+    - name: Optionally delete target namespace
+      redhat.openshift.k8s:
+        state: absent
+        validate_certs: false
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ target_ns }}"
+      ignore_errors: true
+      
+    - name: Final debug - summary of deletion attempts
+      debug:
+        msg:
+          nad_delete_results: "{{ delete_nad_results.results | default([]) | map(attribute='msg') | list }}"
+          vmi_delete_results: "{{ delete_vmi_results.results | default([]) | map(attribute='msg') | list }}"
+          vm_delete_results: "{{ delete_vm_results.results | default([]) | map(attribute='msg') | list }}"
+          pvc_delete_results: "{{ delete_pvc_results.results | default([]) | map(attribute='msg') | list }}"
+          network_map_deleted: "{{ network_map_name }}"
+          storage_map_deleted: "{{ storage_map_name }}"
+          plan_deleted: "{{ plan_name }}"
+          migration_deleted: "{{ migration_name }}"
+          provider_left_intact: "Provider resource is not touched by this playbook"
+
+
+
+
+    - name: Final debug - summary of deletion attempts
+      debug:
+        msg:
+          nad_delete_results: "{{ delete_nad_results.results | default([]) | map(attribute='msg') | list }}"
+          network_map_deleted: "{{ network_map_name }}"
+          storage_map_deleted: "{{ storage_map_name }}"
+          plan_deleted: "{{ plan_name }}"
+          migration_deleted: "{{ migration_name }}"
+          provider_left_intact: "Provider resource is not touched by this playbook"
+
