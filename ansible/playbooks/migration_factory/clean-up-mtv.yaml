@@ -5,6 +5,7 @@
   gather_facts: no
   collections:
     - redhat.openshift
+    - redhat.openshift_virtualization
 
   vars:
 #    ns: openshift-mtv
@@ -101,7 +102,6 @@
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         api_version: kubevirt.io/v1
-        kind: VirtualMachine
         namespace: "{{ target_ns }}"
       register: vm_list
 
@@ -123,17 +123,16 @@
           vm_uids: "{{ vm_uids }}"
 
     - name: List VirtualMachineInstance resources in target namespace
-      redhat.openshift_virtualization.kubevirt_vm_info:
+      redhat.openshift_virtualization.kubevirt_vmi_info:
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         api_version: kubevirt.io/v1
-        kind: VirtualMachineInstance
         namespace: "{{ target_ns }}"
       register: vmi_list
 
     - name: Delete VirtualMachineInstance objects (force stop) if present
       when: vmi_list.resources | length > 0
-      redhat.openshift_virtualization.kubevirt_vm_info:
+      redhat.openshift_virtualization.kubevirt_vmi_info:
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         state: absent
@@ -231,7 +230,7 @@
       ignore_errors: true
       register: delete_pvc_results
 
-    - name: Optionally delete target namespace
+    - name: Delete target namespace
       redhat.openshift.k8s:
         state: absent
         validate_certs: false
