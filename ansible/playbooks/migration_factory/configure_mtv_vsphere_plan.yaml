@@ -301,3 +301,4 @@
             plan:
               name: "{{ plan_name }}"
               namespace: "{{ ns }}"
+      ignore_errors: true
