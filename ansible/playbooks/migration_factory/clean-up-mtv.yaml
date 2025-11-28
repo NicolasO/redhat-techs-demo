@@ -127,15 +127,26 @@
         namespace: "{{ target_ns }}"
       register: pvc_list
 
-    - name: Delete PVC on OCP "{{ target_ns }}"
+    - name: Debug PVC names
+      debug:
+        msg: "{{ pvc_list.resources | map(attribute='metadata.name') | list }}"
+
+    - name: Delete PVCs in target namespace
       redhat.openshift.k8s:
-        host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
-        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
-        validate_certs: false
         state: absent
-        name: "{{ item.metadata.name }}"
         namespace: "{{ target_ns }}"
-      loop: "{{ pvc_list }}"
+        validate_certs: false
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: "{{ item.metadata.name }}"
+            namespace: "{{ target_ns }}"
+      loop: "{{ pvc_list.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      register: delete_pvc_results
+      ignore_errors: true
 
 
     - name: Delete target namespace
