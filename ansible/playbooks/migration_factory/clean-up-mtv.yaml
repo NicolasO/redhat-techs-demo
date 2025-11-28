@@ -7,6 +7,7 @@
     - redhat.openshift
     - redhat.openshift_virtualization
 
+
   vars:
 #    ns: openshift-mtv
     #target_ns: migrate-vsphere
@@ -107,7 +108,7 @@
       
     - name: Set list vms by name
       ansible.builtin.set_fact:
-        vms_list: "{{ result | json_query('resources[*].metadata.name') }}"
+        vms_list: "{{ result.resources | map(attribute='metadata.name') | list }}"
 
     - name: Delete VirtualMachine on OCP "{{ target_ns }}"
       redhat.openshift_virtualization.kubevirt_vm:
