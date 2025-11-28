@@ -121,7 +121,7 @@
       loop: "{{ vms_list }}"
 
     - name: List PVCs in target namespace
-      redhat.openshift.k8s:
+      redhat.openshift.k8s_info:
         host: "{{ lookup('env', 'K8S_AUTH_HOST') }}"
         api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
         validate_certs: false
